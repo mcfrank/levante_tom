@@ -1,0 +1,68 @@
+---
+title: "Untitled"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(mirt)
+library(here)
+```
+
+```{r}
+d1 <- readxl::read_xlsx(here("data","ToMBooklet1-Data.xlsx"), 
+                        sheet = 1) |> clean_names()
+i1 <- readxl::read_xlsx(here("data","ToMBooklet1-Data.xlsx"), 
+                        sheet = 2) |> clean_names()
+s1 <- readxl::read_xlsx(here("data","ToMBooklet1-Data.xlsx"), 
+                        sheet = 4) |> clean_names()
+d2 <- readxl::read_xlsx(here("data","ToMBooklet2-Data.xlsx"), 
+                        sheet = 1) |> clean_names()
+i2 <- readxl::read_xlsx(here("data","ToMBooklet2-Data.xlsx"), 
+                        sheet = 2) |> clean_names()
+s2 <- readxl::read_xlsx(here("data","ToMBooklet2-Data.xlsx"), 
+                        sheet = 4) |> clean_names()
+```
+
+Merge.
+
+```{r}
+d1 <- d1 |>
+  left_join(select(s1, sub_id, age)) |>
+  left_join(i1)
+
+d2 <- d2 |>
+  left_join(select(s2, sub_id, age)) |>
+  left_join(i2)
+
+d <- bind_rows(d1 |> mutate(dataset = "1"),
+               d2 |> mutate(dataset = "2")) |>
+  mutate(answer = as.numeric(answer_0_1)) 
+```
+
+Plot. 
+
+```{r}
+ms <- d |>
+  group_by(sub_id, dataset, age) |>
+  summarise(prop_correct = mean(answer, na.rm=TRUE)) 
+
+ggplot(ms, aes(x = age, y = prop_correct, col = dataset)) + 
+  geom_point() +
+  geom_smooth() 
+```
+
+Reshape to IRT matrix? No question overlap. 
+
+```{r}
+d1_mat <- filter(d, dataset == 1, 
+                 !is.na(q_id)) |>
+  select(sub_id, q_id, answer) |>
+  pivot_wider(names_from = "q_id", values_from = "answer")
+
+
+```
+
+
