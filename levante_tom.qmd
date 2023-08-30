@@ -9,6 +9,8 @@ library(tidyverse)
 library(janitor)
 library(mirt)
 library(here)
+library(ggrepel)
+library(knitr)
 ```
 
 ```{r}
@@ -53,16 +55,71 @@ ggplot(ms, aes(x = age, y = prop_correct, col = dataset)) +
   geom_point() +
   geom_smooth() 
 ```
+Items. There are some items with NA `q_id` fields. Maybe because of translation? The question text seems different...
+
+```{r}
+is <- d |>
+  filter(!is.na(q_id)) |>
+  group_by(q_id, question, dataset) |>
+  summarise(prop_correct = mean(answer, na.rm=TRUE)) 
+
+ggplot(is, aes(x = prop_correct, fill = dataset)) + 
+  geom_histogram()
+
+kable(is |>
+        arrange(dataset, desc(prop_correct)))
+```
 
 Reshape to IRT matrix? No question overlap. 
 
 ```{r}
-d1_mat <- filter(d, dataset == 1, 
+d1_wide <- filter(d, dataset == 1, 
                  !is.na(q_id)) |>
   select(sub_id, q_id, answer) |>
-  pivot_wider(names_from = "q_id", values_from = "answer")
+  pivot_wider(names_from = "q_id", values_from = "answer") 
 
+d1_mat <- d1_wide |>
+  select(-sub_id) |>
+  data.frame() |>
+  data.matrix()
+
+colnames(d1_mat) <- names(d1_wide)[-1]
+rownames(d1_mat) <- d1_wide$sub_id
+
+# Requires no empty rows - `personfit` doesn't work with `removeEmptyRows=TRUE` even though the model fit will work that way. 
+# d_mat_ws <- d_mat_ws[complete.cases(d_mat_ws),]
+```
+
+Fit IRT.
+
+```{r}
+mod_2pl <- mirt(d1_mat, 1, itemtype='2PL', verbose=TRUE, 
+                technical = list(NCYCLES = 2000))
+
+coefs_2pl <- as_tibble(coef(mod_2pl, simplify = TRUE)$items) %>%
+  mutate(q_id = rownames(coef(mod_2pl, simplify = TRUE)$items))
+fscores_2pl <- tibble(sub_id = rownames(d1_mat), 
+                         ability = fscores(mod_2pl, method = "MAP")[,1])
 
 ```
+
+Plot. 
+
+```{r}
+coefs_2pl <- left_join(coefs_2pl, i1)
+
+ggplot(coefs_2pl, aes(x = -a1, y = d)) + 
+  geom_point() + 
+  geom_label_repel(aes(label = question))
+```
+
+One Q is too easy, remove. Other than that, the distribution looks good. 
+
+```{r}
+ggplot(filter(coefs_2pl, a1 < 10),
+       aes(x = -a1, y = d, col = concept_super)) + 
+  geom_point() 
+```
+
 
 
