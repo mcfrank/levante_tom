@@ -11,6 +11,26 @@ library(mirt)
 library(here)
 library(ggrepel)
 library(knitr)
+library(brms)
+library(tidybayes)
+library(ggthemes)
+library(coda)
+library(lavaan)
+
+estimate_mode <- function(s) {
+  d <- density(s)
+  return(d$x[which.max(d$y)])
+}
+
+hdi_upper<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","upper"])
+}
+
+hdi_lower<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","lower"])
+}
 ```
 
 ```{r}
@@ -44,7 +64,7 @@ d <- bind_rows(d1 |> mutate(dataset = "1"),
   mutate(answer = as.numeric(answer_0_1)) 
 ```
 
-Plot. 
+Plot.
 
 ```{r}
 ms <- d |>
@@ -55,6 +75,7 @@ ggplot(ms, aes(x = age, y = prop_correct, col = dataset)) +
   geom_point() +
   geom_smooth() 
 ```
+
 Items. There are some items with NA `q_id` fields. Maybe because of translation? The question text seems different...
 
 ```{r}
@@ -70,7 +91,7 @@ kable(is |>
         arrange(dataset, desc(prop_correct)))
 ```
 
-Reshape to IRT matrix? No question overlap. 
+Reshape to IRT matrix? No question overlap.
 
 ```{r}
 d1_wide <- filter(d, dataset == 1, 
@@ -103,7 +124,7 @@ fscores_2pl <- tibble(sub_id = rownames(d1_mat),
 
 ```
 
-Plot. 
+Plot.
 
 ```{r}
 coefs_2pl <- left_join(coefs_2pl, i1)
@@ -113,7 +134,7 @@ ggplot(coefs_2pl, aes(x = -a1, y = d)) +
   geom_label_repel(aes(label = question))
 ```
 
-One Q is too easy, remove. Other than that, the distribution looks good. 
+One Q is too easy, remove. Other than that, the distribution looks good.
 
 ```{r}
 ggplot(filter(coefs_2pl, a1 < 10),
@@ -121,5 +142,300 @@ ggplot(filter(coefs_2pl, a1 < 10),
   geom_point() 
 ```
 
+# Rasch Models 
 
+```{r}
+d1_rasch <- d1|>
+  filter(qtype == "2AFC", 
+         answer_0_1 != "NA")|>
+  mutate(correct = as.numeric(answer_0_1))
+```
+## Rasch Model 
+
+Fit Rasch model with guessing probability built in. 
+
+```{r}
+# prior_rasch <- prior("normal(0, 2)", class = "b", nlpar = "eta") +
+#   prior("normal(0, 1)", class = "sd", group = "sub_id", nlpar = "eta") +
+#   prior("normal(0, 3)", class = "sd", group = "question_id", nlpar = "eta")
+# 
+# rasch_m <- brm(
+#   data = d1_rasch,
+#   family = brmsfamily("bernoulli", "identity"),
+#   bf(
+#     correct ~ 0.5 + 0.5 * inv_logit(eta),
+#     eta ~ 1 + (1 | question_id) + (1 | sub_id),
+#     nl = TRUE
+#   ),
+#   prior = prior_rasch,
+#   control = list(adapt_delta = 0.95, max_treedepth = 12),
+#   cores = 3,
+#   chains = 3,
+#   iter = 4000
+# )
+# 
+# saveRDS(rasch_m, "./saves/rasch_m.rds")
+
+rasch_m <- readRDS("./saves/rasch_m.rds")
+```
+### ICC
+
+```{r}
+icc_rasch <- posterior_samples(rasch_m)%>% 
+  select(b_eta_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(iter, b_eta_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  mutate(p = 0.5 + 0.5*inv_logit_scaled((b_eta_Intercept + theta + xi))) %>%  
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(d1_rasch%>%select(question_id,concept_super)%>%rename(item = question_id)%>%distinct(item, .keep_all = T))
+```
+
+```{r}
+icc_rasch %>% 
+  #filter(item %in% sel_items_rasch)%>%
+  ggplot(aes(x = theta, y = p,group = item, col = concept_super)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  geom_hline(yintercept = 0.5, lty = 3, alpha = .75)+
+  scale_color_viridis_d(name = "AoA") +
+  labs(title = "ICCs for the 1PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  ylim(0,1)+
+  theme_minimal()
+```
+
+
+
+### Fit indices
+
+Compute in and outfit to see how well individual items fit the Rasch model.
+
+```{r}
+fit_indices <- d1_rasch%>%
+  add_epred_draws(rasch_m, re_formula = ~(1 | question_id) + (1 | sub_id), ndraws = 5000)%>%
+  mutate(zvi = (correct - .epred)/(.epred*(1-.epred))^0.5)%>%
+  group_by(question_id,.draw)%>%
+  summarise(outfit = sum(zvi^2)/length(unique(sub_id)),
+            infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
+```
+```{r}
+fit_indices%>%
+  pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
+  ggplot(. , aes(y = question_id, x = value, col = fit_index))+
+  geom_vline(xintercept = c(0.7, 1.3), lty = 3, alpha = .5)+
+  geom_vline(xintercept = c(0.5, 1.5), lty = 2, alpha = .5)+
+  geom_vline(xintercept = 1, lty = 1, alpha = .5, col = "darkgreen")+
+  stat_halfeye(alpha = .75, .width = c(0.66, 0.95), position = position_dodge())+
+  scale_fill_colorblind()+
+  scale_color_colorblind(name = "Fit index")+
+    labs(x = "Index value", y = "Item")+
+  #facet_grid(~fit_index)+
+  scale_x_continuous(breaks = c(0,0.5, 07, 1, 1.3, 1.5), labels = c(0,0.5, 07, 1, 1.3, 1.5), limits = c(0,7))+
+  theme_bw()+
+  theme(legend.position = c(0.8,0.8))
+```
+
+Use (somewhat arbitrary) cut-offs from the literature to select well-fitting items.
+
+```{r}
+rasch_fit_mode <- fit_indices%>%
+  pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
+  group_by(question_id, fit_index)%>%
+  summarise(mode = estimate_mode(value),
+            lci = hdi_lower(value),
+            uci = hdi_upper(value))
+
+
+rasch_sel_items <- rasch_fit_mode%>%
+  select(-lci, -uci)%>%
+  pivot_wider(names_from = fit_index, values_from = mode)%>%
+  filter(0.7 < infit & 1.3 > infit,
+         0.7 < outfit & 1.3 > outfit)%>%
+  pull(question_id)
+```
+
+Which questions are selected? 
+
+```{r}
+d1_rasch|>
+  filter(question_id %in% rasch_sel_items)|>
+  distinct(question_id, .keep_all = T)|>
+  select(question_id, concept_super, question)
+```
+
+
+## Rasch with selected items
+
+Re-fit rasch model with selected items.
+
+```{r}
+# rasch_m_sel <- brm(
+#   data = d1_rasch|>filter(question_id %in% rasch_sel_items),
+#   family = brmsfamily("bernoulli", "identity"),
+#   bf(
+#     correct ~ 0.5 + 0.5 * inv_logit(eta),
+#     eta ~ 1 + (1 | question_id) + (1 | sub_id),
+#     nl = TRUE
+#   ),
+#   prior = prior_rasch,
+#   control = list(adapt_delta = 0.95, max_treedepth = 12),
+#   cores = 3,
+#   chains = 3,
+#   iter = 4000
+# )%>%add_criterion(c("loo"))
+# 
+# saveRDS(rasch_m_sel, "./saves/rasch_m_sel.rds")
+
+rasch_m_sel <- readRDS("./saves/rasch_m_sel.rds")
+```
+
+### ICC
+
+```{r}
+icc_rasch_sel <- posterior_samples(rasch_m_sel)%>% 
+  select(b_eta_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))%>%
+  expand(nesting(iter, b_eta_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  mutate(p = 0.5 + 0.5*inv_logit_scaled((b_eta_Intercept + theta + xi))) %>%  
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(d1_rasch%>%select(question_id,concept_super)%>%rename(item = question_id)%>%distinct(item, .keep_all = T))
+```
+
+```{r}
+icc_rasch_sel %>% 
+  #filter(item %in% sel_items_rasch)%>%
+  ggplot(aes(x = theta, y = p,group = item, col = concept_super)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  geom_hline(yintercept = 0.5, lty = 3, alpha = .75)+
+  scale_color_viridis_d(name = "Category") +
+  labs(title = "ICCs for the 1PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  ylim(0,1)+
+  theme_minimal()
+```
+
+### Frequentist fit indices
+
+Compute model fit indices. They are not terrible, but not above/below conventional thresholds.
+
+```{r}
+frq_fit_dat <- d1_rasch%>%
+  filter(question_id %in% rasch_sel_items)%>%
+  select(sub_id, question_id, correct)%>%
+  pivot_wider(names_from = question_id, values_from = correct)%>%
+  select( -sub_id)%>%
+  na.omit()
+
+# using lavaan, no idea how to build in the guessing rate
+
+modelx <- paste(paste0("1*",rasch_sel_items, "+"), collapse = " ")
+
+model <- paste0("f =~", substr(modelx, 1, nchar(modelx)-1))
+
+freq <- sem(model, frq_fit_dat, ordered =TRUE, parameterization = "theta")
+ 
+fitMeasures(freq)%>%as_tibble(rownames = "index")%>%
+  filter(index == "rmsea" | index == "cfi" | index == "srmr")
+
+# using mirt
+
+freq_mirt <- mirt(frq_fit_dat, 1, itemtype='Rasch', verbose=TRUE, guess = 0.5,na.rm=TRUE,
+                technical = list(NCYCLES = 2000))
+
+M2(freq_mirt)
+```
+
+## 2PL 
+
+Fit 2PL model for comparison.
+
+```{r}
+
+# prior_2PL <- 
+#   prior("normal(0, 2)", class = "b", nlpar = "eta") +
+#   prior("normal(0, 1)", class = "b", nlpar = "logalpha") +
+#   prior("normal(0, 1)", class = "sd", group = "sub_id", nlpar = "eta") + 
+#   prior("normal(0, 3)", class = "sd", group = "question_id", nlpar = "eta") +
+#   prior("normal(0, 1)", class = "sd", group = "question_id", nlpar = "logalpha")
+# 
+# m_2PL_sel <- brm(
+#   data = d1_rasch|>filter(question_id %in% rasch_sel_items),
+#   family = brmsfamily("bernoulli", "identity"),
+#   bf(
+#     correct ~ 0.5 + 0.5 * inv_logit(exp(logalpha) * eta),
+#     eta ~ 1 + (1 |i| question_id) + (1 | sub_id),
+#     logalpha ~ 1 + (1 |i| question_id),
+#     nl = TRUE
+#   ),
+#   prior = prior_2PL,
+#   control = list(adapt_delta = 0.95, max_treedepth = 12),
+#   cores = 3,
+#   chains = 3,
+#   iter = 4000
+# )%>%add_criterion(c("loo"))
+# 
+# saveRDS(m_2PL_sel, "./saves/m_2PL_sel.rds")
+
+m_2PL_sel <- readRDS("./saves/m_2PL_sel.rds")
+```
+
+### ICC
+
+```{r}
+icc_2PL_sel <- posterior_samples(m_2PL_sel)%>% 
+  select(b_eta_Intercept, b_logalpha_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id")) %>%
+  mutate(item      = str_extract(name, pattern = "(?<=\\[).*(?=,Intercept\\])"),
+         parameter = ifelse(str_detect(name, "eta"), "xi", "logalpha"))%>%
+  select(-name) %>% 
+  pivot_wider(names_from = parameter, values_from = value)%>% 
+  expand(nesting(iter, b_eta_Intercept, b_logalpha_Intercept, item, xi, logalpha),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  # note the difference in the equation
+  mutate(p = 0.5 + 0.5*inv_logit_scaled(exp(b_logalpha_Intercept + logalpha) * (b_eta_Intercept + theta + xi))) %>% 
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(d1_rasch%>%select(question_id,concept_super)%>%rename(item = question_id)%>%distinct(item, .keep_all = T))
+
+
+```
+
+```{r}
+icc_2PL_sel %>% 
+  #filter(item %in% sel_items_rasch)%>%
+  ggplot(aes(x = theta, y = p,group = item, col = concept_super)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  geom_hline(yintercept = 0.5, lty = 3, alpha = .75)+
+  scale_color_viridis_d(name = "Category") +
+  labs(title = "ICCs for the 2PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  ylim(0,1)+
+  theme_minimal()
+```
+Items from the Reference category seem to be a bit problematic.
+
+## Compare models with selected items
+
+2PL fits substantially better. 
+
+```{r}
+loo_compare(rasch_m_sel, m_2PL_sel, criterion = "loo")%>%as_tibble(rownames = "model")
+```
 
