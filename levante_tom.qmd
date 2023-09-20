@@ -31,6 +31,10 @@ hdi_lower<- function(s){
   m <- HPDinterval(mcmc(s))
   return(m["var1","lower"])
 }
+
+func <- function(x){
+  abs(1-x)
+}
 ```
 
 ```{r}
@@ -142,7 +146,7 @@ ggplot(filter(coefs_2pl, a1 < 10),
   geom_point() 
 ```
 
-# Rasch Models 
+# Rasch Models
 
 ```{r}
 d1_rasch <- d1|>
@@ -155,11 +159,12 @@ d2_rasch <- d2|>
          answer_0_1 != "NA")|>
   mutate(correct = as.numeric(answer_0_1))
 ```
+
 # Dataset 1
 
-## Rasch Model 
+## Rasch Model
 
-Fit Rasch model with guessing probability built in. 
+Fit Rasch model with guessing probability built in.
 
 ```{r}
 # prior_rasch <- prior("normal(0, 2)", class = "b", nlpar = "eta") +
@@ -187,6 +192,7 @@ rasch_m <- readRDS("./saves/rasch_m.rds")
 
 
 ```
+
 ### ICC
 
 ```{r}
@@ -219,7 +225,6 @@ icc_rasch %>%
   theme_minimal()
 ```
 
-
 ## Fit indices
 
 Compute in and outfit to see how well individual items fit the Rasch model.
@@ -232,6 +237,7 @@ fit_indices <- d1_rasch%>%
   summarise(outfit = sum(zvi^2)/length(unique(sub_id)),
             infit = (sum(zvi^2*(.epred*(1-.epred)))/sum(.epred*(1-.epred))))
 ```
+
 ```{r}
 fit_indices%>%
   pivot_longer(names_to = "fit_index", values_to = "value", cols = c(outfit, infit))%>%
@@ -248,10 +254,10 @@ fit_indices%>%
   theme_bw()+
   theme(legend.position = c(0.8,0.8))
 ```
+
 ```{r}
 ggsave("./graphs/fit_indices.png", height = 8, width = 6, scale = 1.2)
 ```
-
 
 Use (somewhat arbitrary) cut-offs from the literature to select well-fitting items.
 
@@ -272,7 +278,7 @@ rasch_sel_items <- rasch_fit_mode%>%
   pull(question_id)
 ```
 
-Which questions are selected? 
+Which questions are selected?
 
 ```{r}
 d1_rasch|>
@@ -280,7 +286,6 @@ d1_rasch|>
   distinct(question_id, .keep_all = T)|>
   select(question_id, concept_super, question)
 ```
-
 
 ## Rasch with selected items
 
@@ -339,8 +344,6 @@ icc_rasch_sel %>%
   theme_minimal()
 ```
 
-
-
 ### Frequentist fit indices
 
 Compute model fit indices. They are not terrible, but not above/below conventional thresholds.
@@ -372,7 +375,7 @@ freq_mirt <- mirt(frq_fit_dat, 1, itemtype='Rasch', verbose=TRUE, guess = 0.5,na
 M2(freq_mirt)
 ```
 
-## 2PL 
+## 2PL
 
 Fit 2PL model for comparison.
 
@@ -443,11 +446,12 @@ icc_2PL_sel %>%
   ylim(0,1)+
   theme_minimal()
 ```
+
 Items from the Reference category seem to be a bit problematic.
 
 ## Compare models with selected items
 
-2PL fits substantially better. 
+2PL fits substantially better.
 
 ```{r}
 loo_compare(rasch_m_sel, m_2PL_sel, criterion = "loo")%>%as_tibble(rownames = "model")
@@ -455,9 +459,9 @@ loo_compare(rasch_m_sel, m_2PL_sel, criterion = "loo")%>%as_tibble(rownames = "m
 
 # Dataset 2
 
-## Rasch Model 
+## Rasch Model
 
-Fit Rasch model with guessing probability built in. 
+Fit Rasch model with guessing probability built in.
 
 ```{r}
 prior_rasch <- prior("normal(0, 2)", class = "b", nlpar = "eta") +
@@ -483,6 +487,7 @@ saveRDS(rasch_m2, "./saves/rasch_m2.rds")
 
 rasch_m2 <- readRDS("./saves/rasch_m2.rds")
 ```
+
 ### ICC
 
 ```{r}
@@ -515,8 +520,6 @@ icc_rasch2 %>%
   theme_minimal()
 ```
 
-
-
 ### Fit indices
 
 Compute in and outfit to see how well individual items fit the Rasch model.
@@ -546,10 +549,10 @@ fit_indices2%>%
   theme_bw()+
   theme(legend.position = c(0.8,0.8))
 ```
+
 ```{r}
 ggsave("./graphs/fit_indices2.png", height = 8, width = 6, scale = 1.2)
 ```
-
 
 Use (somewhat arbitrary) cut-offs from the literature to select well-fitting items.
 
@@ -570,7 +573,7 @@ rasch_sel_items2 <- rasch_fit_mode2%>%
   pull(question_id)
 ```
 
-Which questions are selected? 
+Which questions are selected?
 
 ```{r}
 d2_rasch|>
@@ -578,7 +581,6 @@ d2_rasch|>
   distinct(question_id, .keep_all = T)|>
   select(question_id, concept_super, question)
 ```
-
 
 ## Rasch with selected items
 
@@ -669,7 +671,7 @@ freq_mirt2 <- mirt(frq_fit_dat2, 1, itemtype='Rasch', verbose=TRUE, guess = 0.5,
 M2(freq_mirt2)
 ```
 
-## 2PL 
+## 2PL
 
 Fit 2PL model for comparison.
 
@@ -740,89 +742,80 @@ icc_2PL_sel2 %>%
   ylim(0,1)+
   theme_minimal()
 ```
+
 Items from the Reference category seem to be a bit problematic.
 
 ## Compare models with selected items
 
-2PL fits substantially better. 
+2PL fits substantially better.
 
 ```{r}
 loo_compare(rasch_m_sel2, m_2PL_sel2, criterion = "loo")%>%as_tibble(rownames = "model")
 ```
 
+# Automated item selection
 
-# Automated item selection 
-
-## 2PL models with all items 
+## 2PL models with all items
 
 To get discrimination parameters
 
-
 ```{r}
-prior_2PL <-
-  prior("normal(0, 2)", class = "b", nlpar = "eta") +
-  prior("normal(0, 1)", class = "b", nlpar = "logalpha") +
-  prior("normal(0, 1)", class = "sd", group = "sub_id", nlpar = "eta") +
-  prior("normal(0, 3)", class = "sd", group = "question_id", nlpar = "eta") +
-  prior("normal(0, 1)", class = "sd", group = "question_id", nlpar = "logalpha")
-
-m_2PL <- brm(
-  data = d1_rasch,
-  family = brmsfamily("bernoulli", "identity"),
-  bf(
-    correct ~ 0.5 + 0.5 * inv_logit(exp(logalpha) * eta),
-    eta ~ 1 + (1 |i| question_id) + (1 | sub_id),
-    logalpha ~ 1 + (1 |i| question_id),
-    nl = TRUE
-  ),
-  prior = prior_2PL,
-  control = list(adapt_delta = 0.95, max_treedepth = 12),
-  cores = 3,
-  chains = 3,
-  iter = 4000,
-  threads = threading(8), #to speed things up, comment out if not on a cluster
-  backend = "cmdstanr" #to speed things up, comment out if not on a cluster
-)%>%add_criterion(c("loo"))
-
-saveRDS(m_2PL, "./saves/m_2PL.rds")
+# prior_2PL <-
+#   prior("normal(0, 2)", class = "b", nlpar = "eta") +
+#   prior("normal(0, 1)", class = "b", nlpar = "logalpha") +
+#   prior("normal(0, 1)", class = "sd", group = "sub_id", nlpar = "eta") +
+#   prior("normal(0, 3)", class = "sd", group = "question_id", nlpar = "eta") +
+#   prior("normal(0, 1)", class = "sd", group = "question_id", nlpar = "logalpha")
+# 
+# m_2PL <- brm(
+#   data = d1_rasch,
+#   family = brmsfamily("bernoulli", "identity"),
+#   bf(
+#     correct ~ 0.5 + 0.5 * inv_logit(exp(logalpha) * eta),
+#     eta ~ 1 + (1 |i| question_id) + (1 | sub_id),
+#     logalpha ~ 1 + (1 |i| question_id),
+#     nl = TRUE
+#   ),
+#   prior = prior_2PL,
+#   control = list(adapt_delta = 0.95, max_treedepth = 12),
+#   cores = 3,
+#   chains = 3,
+#   iter = 4000,
+#   threads = threading(8), #to speed things up, comment out if not on a cluster
+#   backend = "cmdstanr" #to speed things up, comment out if not on a cluster
+# )%>%add_criterion(c("loo"))
+# 
+# saveRDS(m_2PL, "./saves/m_2PL.rds")
 
 m_2PL <- readRDS("./saves/m_2PL.rds")
 
 
-m_2PL2 <- brm(
-  data = d2_rasch,
-  family = brmsfamily("bernoulli", "identity"),
-  bf(
-    correct ~ 0.5 + 0.5 * inv_logit(exp(logalpha) * eta),
-    eta ~ 1 + (1 |i| question_id) + (1 | sub_id),
-    logalpha ~ 1 + (1 |i| question_id),
-    nl = TRUE
-  ),
-  prior = prior_2PL,
-  control = list(adapt_delta = 0.95, max_treedepth = 12),
-  cores = 3,
-  chains = 3,
-  iter = 4000
-)%>%add_criterion(c("loo"))
-
-saveRDS(m_2PL2, "./saves/m_2PL2.rds")
+# m_2PL2 <- brm(
+#   data = d2_rasch,
+#   family = brmsfamily("bernoulli", "identity"),
+#   bf(
+#     correct ~ 0.5 + 0.5 * inv_logit(exp(logalpha) * eta),
+#     eta ~ 1 + (1 |i| question_id) + (1 | sub_id),
+#     logalpha ~ 1 + (1 |i| question_id),
+#     nl = TRUE
+#   ),
+#   prior = prior_2PL,
+#   control = list(adapt_delta = 0.95, max_treedepth = 12),
+#   cores = 3,
+#   chains = 3,
+#   iter = 4000
+# )%>%add_criterion(c("loo"))
+# 
+# saveRDS(m_2PL2, "./saves/m_2PL2.rds")
 
 m_2PL2 <- readRDS("./saves/m_2PL2.rds")
 ```
 
+## Indices
 
 ```{r}
-bind_rows(
-ranef(rasch_m)$question_id%>%as_tibble(rownames = "question_id"),
-ranef(rasch_m2)$question_id%>%as_tibble(rownames = "question_id")
-)%>% arrange(question_id)%>%
-  pull(Estimate.eta_Intercept)
-  
-rasch_fit_mode%>% select(question_id, fit_index, mode)%>%pivot_wider(names_from = "fit_index", values_from = "mode")%>% arrange(question_id)
-
-
-
 items <- d%>%filter(qtype == "2AFC",answer_0_1 != "NA")%>% arrange(question_id)%>%distinct(question_id)%>%pull(question_id)
+
 easiness_rasch <- bind_rows(
 ranef(rasch_m)$question_id%>%as_tibble(rownames = "question_id"),
 ranef(rasch_m2)$question_id%>%as_tibble(rownames = "question_id")
@@ -841,17 +834,17 @@ outfit <- bind_rows(
 )%>% arrange(question_id)%>% 
   pull(outfit)
 
-disc_2PL <-cc
-
-coef(rasch_m)$question_id[, , "logalpha_Intercept"] %>% as_tibble(rownames = "question_id")
+disc_2PL <-bind_rows(
+coef(m_2PL)$question_id[, , "logalpha_Intercept"] %>% as_tibble(rownames = "question_id"),
+coef(m_2PL2)$question_id[, , "logalpha_Intercept"] %>% as_tibble(rownames = "question_id"))%>% arrange(question_id)%>% 
+  pull(Estimate)
 
 
 
 
 ```
 
-
-
+## Annealing algorithm 
 
 ```{r}
 score_fn <- function(subset) {
@@ -900,14 +893,13 @@ proposal_fn <- function(subset) {
 	return(subset)
 }
 
-simulated_annealing_rasch <- function(k, cooling_ratio=0.999, reset_thresh=1000, break_thresh=10000) {
+simulated_annealing <- function(k, cooling_ratio=0.999, reset_thresh=1000, break_thresh=10000) {
   
-  items <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(targetWord)
-  easiness_rasch <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>%pull(threshold_mode)
-  infit <- irt1_guess_itemloo_idxs %>% arrange(targetWord)%>% pull(infit_mode)
-  outfit <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(outfit_mode)
-  disc_2PL <- coef2PL$targetWord[, , "logalpha_Intercept"] %>% as_tibble(rownames = "item")%>%pull(Estimate)
-  pkd <- irt1_guess_itemloo_idxs%>% arrange(targetWord) %>% pull(pareto_k)
+  items <- items
+  easiness_rasch <- easiness_rasch
+  infit <- infit
+  outfit <- outfit
+  disc_2PL <- disc_2PL
 
   N <- length(easiness_rasch)
 
@@ -964,3 +956,31 @@ simulated_annealing_rasch <- function(k, cooling_ratio=0.999, reset_thresh=1000,
 	return(ret)
 }
 ```
+
+## Test run 
+
+```{r}
+test_20 <- simulated_annealing(20)
+
+items[unlist(test_20$best_subset) == TRUE]
+```
+
+```{r}
+item_sel <- tibble()
+
+for (i in 1:10) {
+  
+   sim <- simulated_annealing(20)
+  
+   sel <- items[unlist(sim$best_subset) == TRUE]
+  
+   it <- d%>%
+     distinct(question_id)%>%
+     filter(question_id %in% sel)%>%
+     select(question_id)%>%
+     mutate(iter = i)
+   
+   item_sel_rasch <- bind_rows(item_sel_rasch, it)
+}
+```
+
