@@ -959,35 +959,41 @@ simulated_annealing <- function(k, cooling_ratio=0.999, reset_thresh=1000, break
 
 ## Automated item slection
 
+Test run
+
 ```{r}
 test_20 <- simulated_annealing(20)
 
 test_sel_items <- items[unlist(test_20$best_subset) == TRUE]
 ```
 
+Ask selection algorithm to select 20 items 100 times 
+
 ```{r}
-# item_sel <- tibble()
-# 
-# for (i in 1:10) {
-#   
-#    sim <- simulated_annealing(20)
-#   
-#    sel <- items[unlist(sim$best_subset) == TRUE]
-#   
-#    it <- d%>%
-#      distinct(question_id)%>%
-#      filter(question_id %in% sel)%>%
-#      select(question_id)%>%
-#      mutate(iter = i)
-#    
-#    item_sel <- bind_rows(item_sel_rasch, it)
-# }
-#
-# saveRDS(item_sel, "./saves/item_sel.rds")
+item_sel <- tibble()
+
+for (i in 1:100) {
+
+   sim <- simulated_annealing(20)
+
+   sel <- items[unlist(sim$best_subset) == TRUE]
+
+   it <- d%>%
+     distinct(question_id)%>%
+     filter(question_id %in% sel)%>%
+     select(question_id)%>%
+     mutate(iter = i)
+
+   item_sel <- bind_rows(item_sel, it)
+}
+
+saveRDS(item_sel, "./saves/item_sel.rds")
 
 item_sel <- readRDS("./saves/item_sel.rds")
 
 ```
+
+Plot how often items were selected. No item was selected every time but some items were selected most of the time (20 items were selected 61 times or more).
 
 ```{r}
 item_sel%>%
@@ -996,8 +1002,10 @@ item_sel%>%
   arrange(-n)%>%
   ggplot(aes(x = reorder(question_id, -n), y = n))+
   geom_bar(stat = "identity", col = "black", fill = "white")+
+  theme_minimal()+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
+Select 20 most often selected items
 
 ```{r}
 final_sel_items <- item_sel%>%
@@ -1007,7 +1015,7 @@ final_sel_items <- item_sel%>%
   head(20)%>%
   pull(question_id)
 ```
-
+Which items were selected? Check wording. Most of them require some form of false belief reasoning. 
 
 ```{r}
 d|>
@@ -1015,6 +1023,9 @@ d|>
   distinct(question_id, .keep_all = T)|>
   select(question_id, concept_super, question)
 ```
+## ICCs for selected items
+
+Visualize Rasch ICC for items 
 
 ```{r}
 comb_icc_rasch <- bind_rows(
@@ -1056,7 +1067,7 @@ comb_icc_rasch %>%
   ylim(0,1)+
   theme_minimal()
 ```
-
+Visualize 2PL ICC for items 
 
 ```{r}
 
@@ -1089,6 +1100,7 @@ posterior_samples(m_2PL2)%>%
   summarise(p = mean(p))%>%
   left_join(d%>%select(question_id,concept_super, dataset)%>%rename(item = question_id)%>%distinct(item, .keep_all = T))
 ```
+
 ```{r}
 comb_icc_2PL %>% 
   #filter(item %in% sel_items_rasch)%>%
@@ -1104,3 +1116,5 @@ comb_icc_2PL %>%
   ylim(0,1)+
   theme_minimal()
 ```
+
+There is a cluster of medium difficult items that all require false belief reasoning, either directly or embedded in moral reasoning. 
