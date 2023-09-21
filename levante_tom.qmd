@@ -970,24 +970,24 @@ test_sel_items <- items[unlist(test_20$best_subset) == TRUE]
 Ask selection algorithm to select 20 items 100 times 
 
 ```{r}
-item_sel <- tibble()
-
-for (i in 1:100) {
-
-   sim <- simulated_annealing(20)
-
-   sel <- items[unlist(sim$best_subset) == TRUE]
-
-   it <- d%>%
-     distinct(question_id)%>%
-     filter(question_id %in% sel)%>%
-     select(question_id)%>%
-     mutate(iter = i)
-
-   item_sel <- bind_rows(item_sel, it)
-}
-
-saveRDS(item_sel, "./saves/item_sel.rds")
+# item_sel <- tibble()
+# 
+# for (i in 1:100) {
+# 
+#    sim <- simulated_annealing(20)
+# 
+#    sel <- items[unlist(sim$best_subset) == TRUE]
+# 
+#    it <- d%>%
+#      distinct(question_id)%>%
+#      filter(question_id %in% sel)%>%
+#      select(question_id)%>%
+#      mutate(iter = i)
+# 
+#    item_sel <- bind_rows(item_sel, it)
+# }
+# 
+# saveRDS(item_sel, "./saves/item_sel.rds")
 
 item_sel <- readRDS("./saves/item_sel.rds")
 
@@ -1008,12 +1008,16 @@ item_sel%>%
 Select 20 most often selected items
 
 ```{r}
-final_sel_items <- item_sel%>%
-  group_by(question_id)%>%
-  summarise(n = n())%>%
-  arrange(-n)%>%
-  head(20)%>%
-  pull(question_id)
+# final_sel_items <- item_sel%>%
+#   group_by(question_id)%>%
+#   summarise(n = n())%>%
+#   arrange(-n)%>%
+#   head(20)%>%
+#   pull(question_id)
+# 
+# saveRDS(final_sel_items, "./saves/final_sel_items.rds")
+
+final_sel_items <- readRDS("./saves/final_sel_items.rds")
 ```
 Which items were selected? Check wording. Most of them require some form of false belief reasoning. 
 
@@ -1067,6 +1071,12 @@ comb_icc_rasch %>%
   ylim(0,1)+
   theme_minimal()
 ```
+
+
+```{r}
+ggsave("./graphs/annealing_select_icc_rasch.png", height = 4, width = 8, bg = "white")
+```
+
 Visualize 2PL ICC for items 
 
 ```{r}
@@ -1116,5 +1126,10 @@ comb_icc_2PL %>%
   ylim(0,1)+
   theme_minimal()
 ```
+
+```{r}
+ggsave("./graphs/annealing_select_icc_2pl.png", height = 4, width = 8, bg = "white")
+```
+
 
 There is a cluster of medium difficult items that all require false belief reasoning, either directly or embedded in moral reasoning. 
