@@ -957,30 +957,150 @@ simulated_annealing <- function(k, cooling_ratio=0.999, reset_thresh=1000, break
 }
 ```
 
-## Test run 
+## Automated item slection
 
 ```{r}
 test_20 <- simulated_annealing(20)
 
-items[unlist(test_20$best_subset) == TRUE]
+test_sel_items <- items[unlist(test_20$best_subset) == TRUE]
 ```
 
 ```{r}
-item_sel <- tibble()
+# item_sel <- tibble()
+# 
+# for (i in 1:10) {
+#   
+#    sim <- simulated_annealing(20)
+#   
+#    sel <- items[unlist(sim$best_subset) == TRUE]
+#   
+#    it <- d%>%
+#      distinct(question_id)%>%
+#      filter(question_id %in% sel)%>%
+#      select(question_id)%>%
+#      mutate(iter = i)
+#    
+#    item_sel <- bind_rows(item_sel_rasch, it)
+# }
+#
+# saveRDS(item_sel, "./saves/item_sel.rds")
 
-for (i in 1:10) {
-  
-   sim <- simulated_annealing(20)
-  
-   sel <- items[unlist(sim$best_subset) == TRUE]
-  
-   it <- d%>%
-     distinct(question_id)%>%
-     filter(question_id %in% sel)%>%
-     select(question_id)%>%
-     mutate(iter = i)
-   
-   item_sel_rasch <- bind_rows(item_sel_rasch, it)
-}
+item_sel <- readRDS("./saves/item_sel.rds")
+
 ```
 
+```{r}
+item_sel%>%
+  group_by(question_id)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  ggplot(aes(x = reorder(question_id, -n), y = n))+
+  geom_bar(stat = "identity", col = "black", fill = "white")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+```{r}
+final_sel_items <- item_sel%>%
+  group_by(question_id)%>%
+  summarise(n = n())%>%
+  arrange(-n)%>%
+  head(20)%>%
+  pull(question_id)
+```
+
+
+```{r}
+d|>
+  filter(question_id %in% final_sel_items)|>
+  distinct(question_id, .keep_all = T)|>
+  select(question_id, concept_super, question)
+```
+
+```{r}
+comb_icc_rasch <- bind_rows(
+  posterior_samples(rasch_m)%>% 
+  select(b_eta_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])")),
+  
+  posterior_samples(rasch_m2)%>% 
+  select(b_eta_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id"), names_to = "item", values_to = "xi") %>%
+  mutate(item = str_extract(string = item, pattern = "(?<=\\[).*(?=,Intercept\\])"))
+  
+  
+)%>%
+  filter(item %in% final_sel_items)%>%
+  expand(nesting(iter, b_eta_Intercept, item, xi),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  mutate(p = 0.5 + 0.5*inv_logit_scaled((b_eta_Intercept + theta + xi))) %>%  
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(d%>%select(question_id,concept_super, dataset)%>%rename(item = question_id)%>%distinct(item, .keep_all = T))
+```
+
+```{r}
+comb_icc_rasch %>% 
+  #filter(item %in% sel_items_rasch)%>%
+  ggplot(aes(x = theta, y = p,group = item, col = concept_super, lty = dataset)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  geom_hline(yintercept = 0.5, lty = 3, alpha = .75)+
+  scale_color_viridis_d(name = "Category") +
+  labs(title = "ICCs for the 1PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  ylim(0,1)+
+  theme_minimal()
+```
+
+
+```{r}
+
+comb_icc_2PL <- bind_rows(
+posterior_samples(m_2PL)%>% 
+  select(b_eta_Intercept, b_logalpha_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id")) %>%
+  mutate(item      = str_extract(name, pattern = "(?<=\\[).*(?=,Intercept\\])"),
+         parameter = ifelse(str_detect(name, "eta"), "xi", "logalpha"))%>%
+  select(-name) %>% 
+  pivot_wider(names_from = parameter, values_from = value),
+
+posterior_samples(m_2PL2)%>% 
+  select(b_eta_Intercept, b_logalpha_Intercept, starts_with("r_question_id"))%>%
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(starts_with("r_question_id")) %>%
+  mutate(item      = str_extract(name, pattern = "(?<=\\[).*(?=,Intercept\\])"),
+         parameter = ifelse(str_detect(name, "eta"), "xi", "logalpha"))%>%
+  select(-name) %>% 
+  pivot_wider(names_from = parameter, values_from = value)
+
+)%>%
+  filter(item %in% final_sel_items)%>% 
+  expand(nesting(iter, b_eta_Intercept, b_logalpha_Intercept, item, xi, logalpha),
+         theta = seq(from = -6, to = 6, length.out = 100)) %>% 
+  # note the difference in the equation
+  mutate(p = 0.5 + 0.5*inv_logit_scaled(exp(b_logalpha_Intercept + logalpha) * (b_eta_Intercept + theta + xi))) %>% 
+  group_by(theta, item) %>% 
+  summarise(p = mean(p))%>%
+  left_join(d%>%select(question_id,concept_super, dataset)%>%rename(item = question_id)%>%distinct(item, .keep_all = T))
+```
+```{r}
+comb_icc_2PL %>% 
+  #filter(item %in% sel_items_rasch)%>%
+  ggplot(aes(x = theta, y = p,group = item, col = concept_super, lty = dataset)) +
+  geom_line() +
+  #facet_wrap(~group)+
+  #guides(col = F)+
+  geom_hline(yintercept = 0.5, lty = 3, alpha = .75)+
+  scale_color_viridis_d(name = "Category") +
+  labs(title = "ICCs for the 2PL",
+       x = expression(theta~('ability on the logit scale')),
+       y = expression(italic(p)(y==1))) +
+  ylim(0,1)+
+  theme_minimal()
+```
