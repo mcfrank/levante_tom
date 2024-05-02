@@ -66,6 +66,8 @@ d2 <- d2 |>
 d <- bind_rows(d1 |> mutate(dataset = "1"),
                d2 |> mutate(dataset = "2")) |>
   mutate(answer = as.numeric(answer_0_1)) 
+
+n_distinct(d2$sub_id) + n_distinct(d1$sub_id)
 ```
 
 Plot.
